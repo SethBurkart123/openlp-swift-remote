@@ -6,6 +6,29 @@ struct ServiceItem: Decodable, Identifiable {
     let id: String
     let title: String
     let selected: Bool
+    let plugin: String?
+    var typeIcon: String {
+        switch plugin {
+        case "songs": return "music.note"
+        case "bibles": return "book.closed"
+        case "images": return "photo"
+        case "media": return "play.rectangle"
+        case "presentations": return "rectangle.on.rectangle"
+        case "custom": return "text.alignleft"
+        default: return "doc.text"
+        }
+    }
+    var typeLabel: String {
+        switch plugin {
+        case "songs": return "Song"
+        case "bibles": return "Bible reading"
+        case "images": return "Images"
+        case "media": return "Media"
+        case "presentations": return "Presentation"
+        case "custom": return "Custom slides"
+        default: return "Service item"
+        }
+    }
 }
 struct SlideResult: Decodable { let item: String?; let slides: [Slide] }
 struct Slide: Decodable {
@@ -274,8 +297,15 @@ struct RootView: View {
                         if confirmed && remote.slideItem == item.id && remote.slides.count > 1 { tab = 1 }
                     }
                 } label: {
-                    Text(item.title).font(.title3).foregroundStyle(.primary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Image(systemName: item.typeIcon)
+                            .font(.body).foregroundStyle(.secondary)
+                            .frame(width: 24).accessibilityHidden(true)
+                        Text(item.title).font(.title3).foregroundStyle(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("\(item.typeLabel), \(item.title)")
                 }
                 .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
                 .allowsHitTesting(!remote.busy)
