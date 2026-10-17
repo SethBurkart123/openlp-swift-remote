@@ -45,6 +45,10 @@ Requires macOS, Xcode with an iOS SDK, and iOS 17 or later. There are no third-p
 
 The checked-in Xcode project is ready to open. To regenerate it after changing `project.yml`, run `xcodegen generate` with [XcodeGen](https://github.com/yonaskolb/XcodeGen).
 
+## Offline demo
+
+Open Settings → **Try Demo** to explore a bundled sample service without an OpenLP server. Song and image selection, display modes, and simulated video playback controls work locally. The demo sends no server requests and preserves your saved connection settings. Choose **Settings → Exit Demo** to return to your server. Video playback uses a still preview and simulated timeline.
+
 ## Demo screenshots
 
 Run the included local API on your Mac:

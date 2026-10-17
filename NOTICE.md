@@ -9,4 +9,4 @@ OpenLP Swift Remote is an independent SwiftUI client. It is not an official Open
 
 ## Demo video frame
 
-The README banner, demo thumbnail, and video screenshot contain a frame from *Big Buck Bunny*: © 2008, Blender Foundation / www.bigbuckbunny.org, licensed under [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). Source: [Blender's official download](https://download.blender.org/demo/movies/BBB/). The frame was extracted at 1:04 and resized for display in the remote.
+The bundled offline-demo image, README banner, demo thumbnail, and video screenshot contain a frame from *Big Buck Bunny*: © 2008, Blender Foundation / www.bigbuckbunny.org, licensed under [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). Source: [Blender's official download](https://download.blender.org/demo/movies/BBB/). The frame was extracted at 1:04 and resized for display in the remote.

@@ -10,6 +10,8 @@
 		7188B01F3395BA50D332CC06 /* OpenLPRemoteApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69964F69FEBE8463A9F24429 /* OpenLPRemoteApp.swift */; };
 		B81ECA1321CF5EBD6AED7CE0 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = B53BE35ADFB0967CB004112A /* PrivacyInfo.xcprivacy */; };
 		CB52F96FC918AFE7A0C4BA3C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 30E0F52966B6A25CA98823CF /* Assets.xcassets */; };
+		EF21C41D519F07B4B4BBBDDD /* demo-bunny.png in Resources */ = {isa = PBXBuildFile; fileRef = ECB912B06C35734A750A5573 /* demo-bunny.png */; };
+		F44C65F6977B73339962721C /* DemoContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = F669F115310BF8D15DC04516 /* DemoContent.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -18,6 +20,8 @@
 		8E77F037D86EF337A897DD2E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		9CF18D71059A09A3E48D2D97 /* OpenLPRemote.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = OpenLPRemote.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B53BE35ADFB0967CB004112A /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		ECB912B06C35734A750A5573 /* demo-bunny.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "demo-bunny.png"; sourceTree = "<group>"; };
+		F669F115310BF8D15DC04516 /* DemoContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoContent.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -33,6 +37,8 @@
 			isa = PBXGroup;
 			children = (
 				30E0F52966B6A25CA98823CF /* Assets.xcassets */,
+				ECB912B06C35734A750A5573 /* demo-bunny.png */,
+				F669F115310BF8D15DC04516 /* DemoContent.swift */,
 				8E77F037D86EF337A897DD2E /* Info.plist */,
 				69964F69FEBE8463A9F24429 /* OpenLPRemoteApp.swift */,
 				B53BE35ADFB0967CB004112A /* PrivacyInfo.xcprivacy */,
@@ -106,6 +112,7 @@
 			files = (
 				CB52F96FC918AFE7A0C4BA3C /* Assets.xcassets in Resources */,
 				B81ECA1321CF5EBD6AED7CE0 /* PrivacyInfo.xcprivacy in Resources */,
+				EF21C41D519F07B4B4BBBDDD /* demo-bunny.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -116,6 +123,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F44C65F6977B73339962721C /* DemoContent.swift in Sources */,
 				7188B01F3395BA50D332CC06 /* OpenLPRemoteApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -157,7 +165,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -216,7 +224,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;

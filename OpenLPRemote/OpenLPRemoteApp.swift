@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 extension KeyedDecodingContainer {
     func flexibleString(_ key: Key) -> String? {
@@ -25,6 +26,9 @@ struct ServiceItem: Decodable, Identifiable {
         title = c.flexibleString(.title) ?? "Untitled item"
         selected = (try? c.decode(Bool.self, forKey: .selected)) ?? false
         plugin = c.flexibleString(.plugin)
+    }
+    init(id: String, title: String, selected: Bool, plugin: String?) {
+        self.id = id; self.title = title; self.selected = selected; self.plugin = plugin
     }
     var typeIcon: String {
         switch plugin {
@@ -84,6 +88,11 @@ struct Slide: Decodable {
         img = c.flexibleString(.img)
     }
 }
+extension Slide {
+    init(text: String, title: String, selected: Bool, img: String? = nil) {
+        self.text = text; self.title = title; self.selected = selected; self.img = img
+    }
+}
 struct Poll: Decodable {
     let blank: Bool
     let theme: Bool
@@ -100,6 +109,9 @@ enum PendingSelection: Equatable {
 }
 
 @MainActor final class Remote: ObservableObject {
+    @Published private(set) var isDemo = false
+    private var demoItem = 1
+    private var demoSlide = 0
     @Published var host = UserDefaults.standard.string(forKey: "host") ?? ""
     @Published var port = UserDefaults.standard.string(forKey: "port") ?? "4316"
     @Published var https = UserDefaults.standard.bool(forKey: "https")
@@ -156,8 +168,9 @@ enum PendingSelection: Equatable {
         return c.url
     }
     var title: String { items.first(where: { $0.id == slideItem })?.title ?? slides.first?.title ?? "Current item" }
-    var canControl: Bool { controlsEnabled && connected }
+    var canControl: Bool { (isDemo || controlsEnabled) && connected }
     func save() {
+        isDemo = false
         pending = nil
         generation += 1
         api = nil; token = nil; pollSupported = true; displayStateKnown = false; apiName = "Detecting"
@@ -169,6 +182,7 @@ enum PendingSelection: Equatable {
         d.set(username, forKey: "username")
     }
     private func request(_ path: String, index: Int? = nil, body: [String: Any]? = nil, authorization: String? = nil) async throws -> Data {
+        guard !isDemo else { throw RemoteError.message("Demo mode does not connect to a server.") }
         guard let baseURL, var c = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
             throw RemoteError.message("Enter a server IP or hostname and a valid port in Settings.")
         }
@@ -196,6 +210,7 @@ enum PendingSelection: Equatable {
         try JSONDecoder().decode(Envelope<T>.self, from: await request(path)).results
     }
     func refresh() async {
+        if isDemo { refreshDemo(); return }
         guard !refreshing else { return }
         refreshing = true
         defer { refreshing = false }
@@ -305,6 +320,7 @@ enum PendingSelection: Equatable {
         // Serialize commands without dimming the controls. The softer selection
         // represents intent; only read-back from OpenLP changes the live selection.
         guard canControl && !busy else { return false }
+        if isDemo { return sendDemo(path, index: index) }
         let current = generation
         let selection = target(for: path, index: index)
         pending = selection
@@ -333,6 +349,13 @@ enum PendingSelection: Equatable {
     }
     func controlMedia(_ action: String, position: Int? = nil) async {
         guard canControl, !busy, let target = media else { return }
+        if isDemo {
+            let next = action == "stop" ? target.start : position ?? Int(mediaPosition())
+            let playing = action == "play" ? true : (action == "pause" || action == "stop" ? false : target.playing)
+            media = MediaStatus(item: target.item, playing: playing, position: max(target.start, min(next, target.duration)), start: target.start, duration: target.duration, seekable: true)
+            mediaReceivedAt = Date()
+            return
+        }
         let localPosition = Int(mediaPosition())
         let nextPosition = action == "stop" ? target.start : position ?? localPosition
         let playing = action == "play" ? true : (action == "pause" || action == "stop" ? false : target.playing)
@@ -364,8 +387,63 @@ enum PendingSelection: Equatable {
             commandError = error.localizedDescription
         }
     }
+    func startDemo() {
+        generation += 1
+        isDemo = true
+        demoItem = 1; demoSlide = 0
+        busy = false; pending = nil; error = nil; commandError = nil
+        optimisticMedia = nil; media = nil; mode = .show
+        refreshDemo()
+    }
+    func endDemo() {
+        isDemo = false
+        save()
+        error = nil; commandError = nil
+    }
+    private func refreshDemo() {
+        items = DemoContent.items.enumerated().map { index, item in
+            ServiceItem(id: "demo-\(index)", title: item.title, selected: index == demoItem, plugin: item.plugin)
+        }
+        let item = DemoContent.items[demoItem]
+        slideItem = "demo-\(demoItem)"
+        slides = item.slides.enumerated().map { index, text in
+            Slide(text: text, title: item.title, selected: index == demoSlide, img: item.preview)
+        }
+        if item.plugin == "media" {
+            if media?.item != slideItem {
+                media = MediaStatus(item: slideItem!, playing: false, position: 0, start: 0, duration: 634000, seekable: true)
+                mediaReceivedAt = Date()
+            } else if let status = media, mediaPosition() >= Double(status.duration), status.playing {
+                media = MediaStatus(item: status.item, playing: false, position: status.duration, start: 0, duration: status.duration, seekable: true)
+                mediaReceivedAt = Date()
+            }
+        } else { media = nil }
+        connected = true; error = nil; apiName = "Offline demo"; displayStateKnown = true; updated = Date()
+    }
+    private func sendDemo(_ path: String, index: Int?) -> Bool {
+        let offset = path.hasSuffix("/next") ? 1 : -1
+        if path == "/api/service/set", let index, DemoContent.items.indices.contains(index) {
+            demoItem = index; demoSlide = 0; media = nil
+        } else if path == "/api/controller/live/set", let index, slides.indices.contains(index) {
+            demoSlide = index
+            if DemoContent.items[demoItem].plugin == "media" { media = nil }
+        } else if path.hasPrefix("/api/service/direction/") {
+            demoItem = max(0, min(DemoContent.items.count - 1, demoItem + offset)); demoSlide = 0; media = nil
+        } else if path.hasPrefix("/api/controller/live/") {
+            demoSlide = max(0, min(slides.count - 1, demoSlide + offset))
+        } else if path.hasPrefix("/api/display/"), let selected = DisplayMode.allCases.first(where: { path.hasSuffix($0.rawValue.lowercased()) }) {
+            mode = selected
+        } else { return false }
+        refreshDemo()
+        return true
+    }
+
     var previewRevision: Int { generation }
     func loadPreview(_ path: String) async throws -> UIImage {
+        if isDemo {
+            guard path == "demo-bunny", let url = Bundle.main.url(forResource: "demo-bunny", withExtension: "png"), let image = UIImage(contentsOfFile: url.path) else { throw RemoteError.message("Demo preview unavailable.") }
+            return image
+        }
         if path.hasPrefix("data:image/"), path.utf8.count <= 14_000_000,
            let comma = path.firstIndex(of: ","), path[..<comma].hasSuffix(";base64"),
            let data = Data(base64Encoded: String(path[path.index(after: comma)...])),
@@ -431,6 +509,7 @@ struct RootView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(error).font(.callout)
                         Button("Connection settings") { settings = true }
+                        Button("Try Demo") { remote.startDemo() }
                     }.frame(maxWidth: .infinity, alignment: .leading).padding().background(Color.orange.opacity(0.1))
                 }
                 if slides { slideList } else { serviceList }
@@ -525,11 +604,13 @@ struct MediaControls: View {
     let media: MediaStatus
     @State private var seeking = false
     @State private var seekPosition = 0.0
+    private let playbackClock = Timer.publish(every: 1.0 / 30, on: .main, in: .common).autoconnect()
     private func time(_ milliseconds: Int) -> String {
         let seconds = max(0, milliseconds / 1000)
         return String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
     private func skip(_ delta: Int) {
+        seeking = false
         let target = max(media.start, min(Int(remote.mediaPosition()) + delta, media.duration))
         Task { await remote.controlMedia("seek", position: target) }
     }
@@ -552,30 +633,37 @@ struct MediaControls: View {
                 }
             }.font(.title3).buttonStyle(.borderless).frame(height: 44)
             if media.seekable && media.duration > media.start {
-                TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !media.playing || seeking)) { context in
-                    let position = seeking ? seekPosition : remote.mediaPosition(at: context.date)
-                    Slider(value: Binding(get: { position }, set: {
-                        seekPosition = $0
-                        seeking = true
-                    }), in: Double(media.start)...Double(media.duration), onEditingChanged: { editing in
-                        if !editing {
-                            let target = Int(seekPosition)
-                            seeking = false
-                            Task { await remote.controlMedia("seek", position: target) }
-                        }
-                    }).accessibilityLabel("Video position")
-                    HStack {
-                        Text(time(Int(position)))
-                        Spacer()
-                        Text(time(media.duration))
-                    }.font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                }
+                timeline
+                    .onAppear { seekPosition = remote.mediaPosition() }
+                    .onReceive(playbackClock) { date in
+                        if !seeking { seekPosition = remote.mediaPosition(at: date) }
+                    }
             }
         }
         .padding(.horizontal, 16).padding(.bottom, 8)
         .disabled(!remote.canControl)
         .allowsHitTesting(!remote.busy)
     }
+    private var timeline: some View {
+        VStack(spacing: 6) {
+            Slider(value: $seekPosition,
+                   in: Double(media.start)...Double(media.duration), onEditingChanged: { editing in
+                if editing {
+                    seeking = true
+                } else {
+                    let target = Int(seekPosition)
+                    seeking = false
+                    Task { await remote.controlMedia("seek", position: target) }
+                }
+            }).accessibilityLabel("Video position")
+            HStack {
+                Text(time(Int(seekPosition)))
+                Spacer()
+                Text(time(media.duration))
+            }.font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+        }
+    }
+
 }
 
 struct MediaPreview: View {
@@ -643,6 +731,18 @@ struct SettingsView: View {
                     Button("Save and check connection") { apply(); Task { await remote.refresh() } }
                     if let error = remote.error { Text(error).font(.footnote).foregroundStyle(.red) }
                 }
+                if remote.isDemo {
+                    Section("Demo artwork") {
+                        Text("Big Buck Bunny © 2008 Blender Foundation / www.bigbuckbunny.org. Sample frame resized for display.").font(.footnote)
+                        Link("Creative Commons Attribution 3.0", destination: URL(string: "https://creativecommons.org/licenses/by/3.0/")!)
+                    }
+                }
+                Section {
+                    Button(remote.isDemo ? "Exit Demo" : "Try Demo") {
+                        if remote.isDemo { remote.endDemo() } else { remote.startDemo() }
+                        dismiss()
+                    }
+                } footer: { Text("Explore sample slides and simulated media controls offline. Your server settings stay saved.") }
                 Section { Link("About OpenLP", destination: URL(string: "https://openlp.org")!).frame(maxWidth: .infinity) }
             }
             .navigationTitle("Settings").navigationBarTitleDisplayMode(.inline)
