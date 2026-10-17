@@ -6,6 +6,12 @@ A small, native iPhone remote for [OpenLP](https://openlp.org), built with Swift
 
 This is an independent project, not an official OpenLP release.
 
+## Get the beta
+
+[**Install with TestFlight →**](https://testflight.apple.com/join/5uzyhttw)
+
+Open the invite link on your iPhone to join the public beta. Builds become available after Apple’s beta review. Once installed, open Settings to connect to your OpenLP computer, or choose **Try Demo** to explore without a server.
+
 ## Screenshots
 
 Screenshots use fictional demo service content and original sample lyrics. The banner and video screenshot show a simulated paused playback state with a frame from *Big Buck Bunny* — © 2008 Blender Foundation / www.bigbuckbunny.org, [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/).
@@ -31,7 +37,7 @@ Screenshots use fictional demo service content and original sample lyrics. The b
 - Play/pause, stop, ten-second skips, and a native timeline for live media on the patched server.
 - HTTP or HTTPS connections and optional Basic authentication.
 - Live controls default to enabled. Your manual setting is remembered across launches, backgrounding, and reconnects. Commands remain unavailable while disconnected.
-- Pull to refresh and automatic foreground refresh every two seconds.
+- Pull to refresh and automatic foreground refresh every half-second.
 
 ## Build and connect
 
