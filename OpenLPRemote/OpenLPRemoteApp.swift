@@ -36,7 +36,9 @@ enum PendingSelection: Equatable {
     @Published var needsAuth = UserDefaults.standard.bool(forKey: "needsAuth")
     @Published var username = UserDefaults.standard.string(forKey: "username") ?? ""
     @Published var password = ""
-    @Published var controlsEnabled = false
+    @Published var controlsEnabled = UserDefaults.standard.object(forKey: "controlsEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(controlsEnabled, forKey: "controlsEnabled") }
+    }
     @Published var items: [ServiceItem] = []
     @Published var slides: [Slide] = []
     @Published var slideItem: String?
@@ -68,7 +70,6 @@ enum PendingSelection: Equatable {
     func save() {
         pending = nil
         generation += 1
-        controlsEnabled = false
         connected = false
         items = []; slides = []; slideItem = nil
         let d = UserDefaults.standard
@@ -111,8 +112,8 @@ enum PendingSelection: Equatable {
             mode = poll.blank ? .blank : poll.theme ? .theme : poll.display ? .desktop : .show
             connected = true; error = nil; updated = Date()
         } catch {
-            guard current == generation else { return }
-            connected = false; controlsEnabled = false
+            guard current == generation, !Task.isCancelled else { return }
+            connected = false
             self.error = error.localizedDescription
         }
     }
@@ -171,15 +172,25 @@ enum PendingSelection: Equatable {
             } while Date() < deadline
             throw RemoteError.message("OpenLP has not confirmed the requested selection yet.")
         } catch {
-            controlsEnabled = false
             commandError = "Could not confirm the command. Check the projection before retrying. \(error.localizedDescription)"
             return false
         }
     }
-    func imageURL(_ path: String) -> URL? {
-        guard path.hasPrefix("/images/") else { return nil }
-        return URL(string: path, relativeTo: baseURL)?.absoluteURL
+    var previewRevision: Int { generation }
+    func loadPreview(_ path: String) async throws -> UIImage {
+        let allowed = ["/api/controller/live/thumbnail/", "/images/", "/media/", "/presentations/"]
+        guard allowed.contains(where: { path.hasPrefix($0) }) else {
+            throw RemoteError.message("Unsupported preview address.")
+        }
+        // Use the same origin and authentication as API requests. AsyncImage
+        // does not attach the user's configured Authorization header.
+        let data = try await request(path)
+        guard data.count <= 10_000_000, let image = UIImage(data: data) else {
+            throw RemoteError.message("Preview image is unavailable.")
+        }
+        return image
     }
+
 }
 enum RemoteError: LocalizedError {
     case message(String)
@@ -212,7 +223,6 @@ struct RootView: View {
                 try? await Task.sleep(for: .seconds(2))
             }
         }
-        .onChange(of: scenePhase) { _, phase in if phase != .active { remote.controlsEnabled = false } }
     }
     private func page(slides: Bool) -> some View {
         NavigationStack {
@@ -283,14 +293,8 @@ struct RootView: View {
                     Task { await remote.send("/api/controller/live/set", index: index) }
                 } label: {
                     VStack(alignment: .leading, spacing: 10) {
-                        if let path = slide.img, let url = remote.imageURL(path) {
-                            AsyncImage(url: url) { phase in
-                                switch phase {
-                                case .success(let image): image.resizable().scaledToFit()
-                                case .failure: Label("Preview unavailable", systemImage: "photo").font(.caption).foregroundStyle(.secondary)
-                                default: ProgressView().frame(maxWidth: .infinity)
-                                }
-                            }
+                        if let path = slide.img {
+                            MediaPreview(path: path)
                         }
                         Text(slide.text).font(.title3).foregroundStyle(.primary).fixedSize(horizontal: false, vertical: true)
                     }.frame(maxWidth: .infinity, alignment: .leading)
@@ -305,6 +309,38 @@ struct RootView: View {
     }
 }
 
+struct MediaPreview: View {
+    @EnvironmentObject var remote: Remote
+    let path: String
+    @State private var image: UIImage?
+    @State private var failed = false
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image).resizable().scaledToFit()
+                    .frame(maxHeight: 240).frame(maxWidth: .infinity)
+                    .accessibilityLabel("Slide preview")
+            } else if failed {
+                Label("Preview unavailable", systemImage: "photo")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                ProgressView().frame(maxWidth: .infinity).frame(height: 90)
+            }
+        }
+        .task(id: "\(remote.previewRevision):\(path)") {
+            image = nil; failed = false
+            do {
+                let loaded = try await remote.loadPreview(path)
+                guard !Task.isCancelled else { return }
+                image = loaded
+            } catch {
+                guard !Task.isCancelled else { return }
+                failed = true
+            }
+        }
+    }
+}
+
 struct SettingsView: View {
     @EnvironmentObject var remote: Remote
     @Environment(\.dismiss) var dismiss
@@ -314,7 +350,6 @@ struct SettingsView: View {
     @State private var auth = false
     @State private var username = ""
     @State private var password = ""
-    @State private var confirmEnable = false
     var body: some View {
         NavigationStack {
             Form {
@@ -331,11 +366,9 @@ struct SettingsView: View {
                     }
                 } footer: { if auth { Text("Password is kept for this session only.") } }
                 Section {
-                    Toggle("Enable live controls", isOn: Binding(get: { remote.controlsEnabled }, set: { enabled in
-                        if enabled { confirmEnable = true } else { remote.controlsEnabled = false }
-                    })).disabled(!remote.connected || changed)
+                    Toggle("Enable live controls", isOn: $remote.controlsEnabled)
                 } footer: {
-                    Text("When enabled, tapping items, arrows or display controls changes the live projection. Controls lock when the app goes into the background or loses connection.")
+                    Text("When enabled, tapping items, arrows or display controls changes the live projection. Your choice is remembered. Controls reconnect automatically when the server is available.")
                 }
                 Section {
                     LabeledContent("Connection", value: remote.connected ? "Connected" : "Disconnected")
@@ -348,9 +381,7 @@ struct SettingsView: View {
             .navigationTitle("Settings").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("OK") { if changed { apply() }; dismiss(); Task { await remote.refresh() } }.bold() } }
             .onAppear { host = remote.host; port = remote.port; https = remote.https; auth = remote.needsAuth; username = remote.username; password = remote.password }
-            .confirmationDialog("Enable control of the live projection?", isPresented: $confirmEnable, titleVisibility: .visible) {
-                Button("Enable live controls", role: .destructive) { remote.controlsEnabled = true }
-            } message: { Text("Service and slide taps will immediately change what the audience sees.") }
+
         }
     }
     private var changed: Bool { host != remote.host || port != remote.port || https != remote.https || auth != remote.needsAuth || username != remote.username || password != remote.password }
