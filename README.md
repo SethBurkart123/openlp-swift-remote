@@ -23,6 +23,7 @@ All screenshots use fictional demo service content and original sample lyrics.
 - Single-slide service items stay on Service. Multi-slide items open Slides after confirmation.
 - Previous/next controls and Blank, Theme, Desktop, and Show modes.
 - Image previews and video stills when supported by the OpenLP server.
+- Play/pause, stop, ten-second skips, and a native timeline for live media on the patched server.
 - HTTP or HTTPS connections and optional Basic authentication.
 - Live controls default to enabled. Your manual setting is remembered across launches, backgrounding, and reconnects. Commands remain unavailable while disconnected.
 - Pull to refresh and automatic foreground refresh every two seconds.
@@ -53,7 +54,7 @@ In the iPhone simulator, connect to `127.0.0.1`, port `9431`, with HTTPS and aut
 
 The app uses OpenLP’s legacy `/api` endpoints. The API contract was checked against OpenLP 3.1.7 source and read against a running OpenLP server. It has not been tested against every OpenLP release.
 
-The OpenLP API must be reachable even when its web interface is unavailable. Image previews depend on the server’s thumbnail endpoints; unavailable thumbnails show a placeholder. The companion OpenLP fork change on `codex/remote-media-previews` adds authenticated previews for the current live item at `/api/controller/live/thumbnail/<item-id>/<slide-index>`. Run that patched OpenLP source and enable thumbnails in its remote/API settings. Local video files require FFmpeg on the OpenLP computer; previews are still frames from the configured start time, not streaming playback. Streaming URLs and optical media are excluded. The app does not include search, alerts, or service editing.
+The OpenLP API must be reachable even when its web interface is unavailable. Image previews depend on the server’s thumbnail endpoints; unavailable thumbnails show a placeholder. The companion OpenLP fork change on `codex/remote-media-previews` adds authenticated previews for the current live item at `/api/controller/live/thumbnail/<item-id>/<slide-index>`. Run that patched OpenLP source and enable thumbnails in its remote/API settings. Local video files require FFmpeg on the OpenLP computer; previews are still frames from the configured start time, not streaming playback. Streaming URLs and optical media are excluded from thumbnails and seeking. Playback controls require the companion media-control API patch; older servers simply omit the controls. Commands target a specific service item and execute on the OpenLP GUI thread. The app does not include search, alerts, or service editing.
 
 Commands are serialized: additional taps are ignored while a command is awaiting confirmation, without dimming the controls. Confirmation times out after eight seconds and prompts you to check the projection before retrying. Passwords are kept only for the current app session. Basic authentication over HTTP is not encrypted; use HTTPS on networks where credentials need protection.
 

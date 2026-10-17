@@ -30,7 +30,15 @@ struct ServiceItem: Decodable, Identifiable {
         }
     }
 }
-struct SlideResult: Decodable { let item: String?; let slides: [Slide] }
+struct MediaStatus: Decodable {
+    let item: String
+    let playing: Bool
+    let position: Int
+    let start: Int
+    let duration: Int
+    let seekable: Bool
+}
+struct SlideResult: Decodable { let item: String?; let slides: [Slide]; let media: MediaStatus? }
 struct Slide: Decodable {
     let text: String
     let title: String
@@ -64,6 +72,7 @@ enum PendingSelection: Equatable {
     }
     @Published var items: [ServiceItem] = []
     @Published var slides: [Slide] = []
+    @Published var media: MediaStatus?
     @Published var slideItem: String?
     @Published var mode: DisplayMode = .show
     @Published var connected = false
@@ -94,13 +103,13 @@ enum PendingSelection: Equatable {
         pending = nil
         generation += 1
         connected = false
-        items = []; slides = []; slideItem = nil
+        items = []; slides = []; slideItem = nil; media = nil
         let d = UserDefaults.standard
         d.set(host, forKey: "host"); d.set(port, forKey: "port")
         d.set(https, forKey: "https"); d.set(needsAuth, forKey: "needsAuth")
         d.set(username, forKey: "username")
     }
-    private func request(_ path: String, index: Int? = nil) async throws -> Data {
+    private func request(_ path: String, index: Int? = nil, body: [String: Any]? = nil) async throws -> Data {
         guard let baseURL, var c = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
             throw RemoteError.message("Enter a server IP or hostname and a valid port in Settings.")
         }
@@ -108,6 +117,11 @@ enum PendingSelection: Equatable {
         if let index { c.queryItems = [URLQueryItem(name: "data", value: "{\"request\":{\"id\":\(index)}}")] }
         guard let url = c.url else { throw RemoteError.message("Invalid server address.") }
         var req = URLRequest(url: url)
+        if let body {
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        }
         if needsAuth {
             req.setValue("Basic " + Data("\(username):\(password)".utf8).base64EncodedString(), forHTTPHeaderField: "Authorization")
         }
@@ -131,7 +145,7 @@ enum PendingSelection: Equatable {
             let live = try await read("/api/controller/live/text", as: SlideResult.self)
             let poll = try await read("/api/poll", as: Poll.self)
             guard current == generation else { return }
-            items = service.items; slides = live.slides; slideItem = live.item
+            items = service.items; slides = live.slides; slideItem = live.item; media = live.media
             mode = poll.blank ? .blank : poll.theme ? .theme : poll.display ? .desktop : .show
             connected = true; error = nil; updated = Date()
         } catch {
@@ -199,6 +213,32 @@ enum PendingSelection: Equatable {
             return false
         }
     }
+    func controlMedia(_ action: String, position: Int? = nil) async {
+        guard canControl, !busy, let target = media else { return }
+        busy = true
+        defer { busy = false }
+        let current = generation
+        do {
+            var body: [String: Any] = ["item": target.item]
+            if let position { body["position"] = position }
+            _ = try await request("/api/controller/live/media/\(action)", body: body)
+            let deadline = Date().addingTimeInterval(5)
+            repeat {
+                try await Task.sleep(for: .milliseconds(200))
+                await refresh()
+                guard current == generation, slideItem == target.item else { return }
+                if let media {
+                    if action == "play" && media.playing { return }
+                    if action == "pause" && !media.playing { return }
+                    if action == "stop" && !media.playing && abs(media.position - media.start) < 1000 { return }
+                    if action == "seek", let position, abs(media.position - position) < 1500 { return }
+                }
+            } while Date() < deadline
+            throw RemoteError.message("OpenLP has not confirmed the playback change yet.")
+        } catch {
+            commandError = error.localizedDescription
+        }
+    }
     var previewRevision: Int { generation }
     func loadPreview(_ path: String) async throws -> UIImage {
         let allowed = ["/api/controller/live/thumbnail/", "/images/", "/media/", "/presentations/"]
@@ -257,6 +297,9 @@ struct RootView: View {
                     }.frame(maxWidth: .infinity, alignment: .leading).padding().background(Color.orange.opacity(0.1))
                 }
                 if slides { slideList } else { serviceList }
+                if let media = remote.media {
+                    MediaControls(media: media).id(media.item)
+                }
                 VStack(spacing: 0) {
                     Divider()
                     Picker("Display", selection: Binding(get: { remote.mode }, set: { mode in
@@ -336,6 +379,57 @@ struct RootView: View {
             }
         }.listStyle(.plain).refreshable { await remote.refresh() }
         .overlay { if remote.slides.isEmpty && remote.connected { ContentUnavailableView("No live slides", systemImage: "rectangle.on.rectangle", description: Text("Slides appear when an item is live in OpenLP.")) } }
+    }
+}
+
+struct MediaControls: View {
+    @EnvironmentObject var remote: Remote
+    let media: MediaStatus
+    @State private var seeking = false
+    @State private var seekPosition = 0.0
+    private func time(_ milliseconds: Int) -> String {
+        let seconds = max(0, milliseconds / 1000)
+        return String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
+    private func skip(_ delta: Int) {
+        let target = max(media.start, min(media.position + delta, media.duration))
+        Task { await remote.controlMedia("seek", position: target) }
+    }
+    var body: some View {
+        VStack(spacing: 6) {
+            Divider()
+            HStack(spacing: 28) {
+                Button { skip(-10_000) } label: { Image(systemName: "gobackward.10") }
+                    .disabled(!media.seekable).accessibilityLabel("Back ten seconds")
+                Button { Task { await remote.controlMedia(media.playing ? "pause" : "play") } } label: {
+                    Image(systemName: media.playing ? "pause.fill" : "play.fill")
+                }.accessibilityLabel(media.playing ? "Pause video" : "Play video")
+                Button { Task { await remote.controlMedia("stop") } } label: { Image(systemName: "stop.fill") }
+                    .accessibilityLabel("Stop video")
+                Button { skip(10_000) } label: { Image(systemName: "goforward.10") }
+                    .disabled(!media.seekable).accessibilityLabel("Forward ten seconds")
+            }.font(.title3).buttonStyle(.borderless).frame(height: 44)
+            if media.seekable && media.duration > media.start {
+                Slider(value: Binding(get: {
+                    seeking ? seekPosition : Double(max(media.start, min(media.position, media.duration)))
+                }, set: { seekPosition = $0 }), in: Double(media.start)...Double(media.duration), onEditingChanged: { editing in
+                    if editing { seekPosition = Double(media.position); seeking = true }
+                    else {
+                        seeking = false
+                        let position = Int(seekPosition)
+                        Task { await remote.controlMedia("seek", position: position) }
+                    }
+                }).accessibilityLabel("Video position")
+                HStack {
+                    Text(time(seeking ? Int(seekPosition) : media.position))
+                    Spacer()
+                    Text(time(media.duration))
+                }.font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 16).padding(.bottom, 8)
+        .disabled(!remote.canControl)
+        .allowsHitTesting(!remote.busy)
     }
 }
 
