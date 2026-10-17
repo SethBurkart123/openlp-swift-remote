@@ -1,5 +1,7 @@
 # OpenLP Swift Remote
 
+![OpenLP Swift Remote showing Service and Slides on iPhone](docs/banner.webp)
+
 A small, native iPhone remote for [OpenLP](https://openlp.org), built with SwiftUI. Browse the service, select slides, and control the display without installing OpenLP’s web remote files.
 
 This is an independent project, not an official OpenLP release.
