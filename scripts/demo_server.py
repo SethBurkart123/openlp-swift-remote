@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Local demo API for screenshots. Never connects to a real OpenLP server."""
+import argparse
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -90,5 +91,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 if __name__ == '__main__':
-    print('Demo OpenLP API: http://127.0.0.1:9431', flush=True)
-    ThreadingHTTPServer(('127.0.0.1', 9431), Handler).serve_forever()
+    parser = argparse.ArgumentParser(description='Isolated OpenLP demo API')
+    parser.add_argument('--host', default='127.0.0.1', help='Listening address; use 0.0.0.0 for phone testing')
+    args = parser.parse_args()
+    print(f'Demo OpenLP API: http://{args.host}:9431', flush=True)
+    ThreadingHTTPServer((args.host, 9431), Handler).serve_forever()

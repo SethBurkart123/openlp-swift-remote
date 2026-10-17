@@ -6,6 +6,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: '5.0'
+    MARKETING_VERSION: '1.0'
+    CURRENT_PROJECT_VERSION: '2'
     TARGETED_DEVICE_FAMILY: '1,2'
 targets:
   OpenLPRemote:
@@ -23,6 +25,12 @@ targets:
     info:
       path: OpenLPRemote/Info.plist
       properties:
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        ITSAppUsesNonExemptEncryption: false
         NSLocalNetworkUsageDescription: Connect to your OpenLP computer to view and control its service.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true

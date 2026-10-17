@@ -53,6 +53,8 @@ Run the included local API on your Mac:
 python3 scripts/demo_server.py
 ```
 
+For testing on a physical phone, run `python3 scripts/demo_server.py --host 0.0.0.0` and connect to your Mac’s LAN address on port `9431`.
+
 In the iPhone simulator, connect to `127.0.0.1`, port `9431`, with HTTPS and authentication off. This demo never contacts a real OpenLP server. Its content is fictional and can be used for screenshots.
 
 ## Compatibility and limitations
