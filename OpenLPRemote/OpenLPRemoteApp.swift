@@ -537,15 +537,19 @@ struct MediaControls: View {
         VStack(spacing: 6) {
             Divider()
             HStack(spacing: 28) {
-                Button { skip(-10_000) } label: { Image(systemName: "gobackward.10") }
-                    .disabled(!media.seekable).accessibilityLabel("Back ten seconds")
+                if media.seekable {
+                    Button { skip(-10_000) } label: { Image(systemName: "gobackward.10") }
+                        .accessibilityLabel("Back ten seconds")
+                }
                 Button { Task { await remote.controlMedia(media.playing ? "pause" : "play") } } label: {
                     Image(systemName: media.playing ? "pause.fill" : "play.fill")
                 }.accessibilityLabel(media.playing ? "Pause video" : "Play video")
                 Button { Task { await remote.controlMedia("stop") } } label: { Image(systemName: "stop.fill") }
                     .accessibilityLabel("Stop video")
-                Button { skip(10_000) } label: { Image(systemName: "goforward.10") }
-                    .disabled(!media.seekable).accessibilityLabel("Forward ten seconds")
+                if media.seekable {
+                    Button { skip(10_000) } label: { Image(systemName: "goforward.10") }
+                        .accessibilityLabel("Forward ten seconds")
+                }
             }.font(.title3).buttonStyle(.borderless).frame(height: 44)
             if media.seekable && media.duration > media.start {
                 TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !media.playing || seeking)) { context in
@@ -585,10 +589,7 @@ struct MediaPreview: View {
                 Image(uiImage: image).resizable().scaledToFit()
                     .frame(maxHeight: 240).frame(maxWidth: .infinity)
                     .accessibilityLabel("Slide preview")
-            } else if failed {
-                Label("Preview unavailable", systemImage: "photo")
-                    .font(.caption).foregroundStyle(.secondary)
-            } else {
+            } else if !failed {
                 ProgressView().frame(maxWidth: .infinity).frame(height: 90)
             }
         }
