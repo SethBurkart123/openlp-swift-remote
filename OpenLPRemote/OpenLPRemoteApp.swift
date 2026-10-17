@@ -73,6 +73,19 @@ enum PendingSelection: Equatable {
     @Published var items: [ServiceItem] = []
     @Published var slides: [Slide] = []
     @Published var media: MediaStatus?
+    @Published private var mediaReceivedAt = Date()
+    @Published private var optimisticMedia: MediaStatus?
+    private var optimisticMediaAt = Date()
+    var displayedMedia: MediaStatus? {
+        if let optimisticMedia, optimisticMedia.item == media?.item { return optimisticMedia }
+        return media
+    }
+    func mediaPosition(at date: Date = Date()) -> Double {
+        guard let status = displayedMedia else { return 0 }
+        let anchor = optimisticMedia?.item == status.item ? optimisticMediaAt : mediaReceivedAt
+        let elapsed = status.playing && connected ? max(0, date.timeIntervalSince(anchor)) * 1000 : 0
+        return max(Double(status.start), min(Double(status.duration), Double(status.position) + elapsed))
+    }
     @Published var slideItem: String?
     @Published var mode: DisplayMode = .show
     @Published var connected = false
@@ -103,7 +116,7 @@ enum PendingSelection: Equatable {
         pending = nil
         generation += 1
         connected = false
-        items = []; slides = []; slideItem = nil; media = nil
+        items = []; slides = []; slideItem = nil; media = nil; optimisticMedia = nil
         let d = UserDefaults.standard
         d.set(host, forKey: "host"); d.set(port, forKey: "port")
         d.set(https, forKey: "https"); d.set(needsAuth, forKey: "needsAuth")
@@ -143,9 +156,10 @@ enum PendingSelection: Equatable {
         do {
             let service = try await read("/api/service/list", as: ServiceResult.self)
             let live = try await read("/api/controller/live/text", as: SlideResult.self)
+            let mediaSampleTime = Date()
             let poll = try await read("/api/poll", as: Poll.self)
             guard current == generation else { return }
-            items = service.items; slides = live.slides; slideItem = live.item; media = live.media
+            items = service.items; slides = live.slides; slideItem = live.item; media = live.media; mediaReceivedAt = mediaSampleTime
             mode = poll.blank ? .blank : poll.theme ? .theme : poll.display ? .desktop : .show
             connected = true; error = nil; updated = Date()
         } catch {
@@ -215,8 +229,15 @@ enum PendingSelection: Equatable {
     }
     func controlMedia(_ action: String, position: Int? = nil) async {
         guard canControl, !busy, let target = media else { return }
+        let localPosition = Int(mediaPosition())
+        let nextPosition = action == "stop" ? target.start : position ?? localPosition
+        let playing = action == "play" ? true : (action == "pause" || action == "stop" ? false : target.playing)
+        optimisticMediaAt = Date()
+        optimisticMedia = MediaStatus(item: target.item, playing: playing,
+            position: max(target.start, min(nextPosition, target.duration)), start: target.start,
+            duration: target.duration, seekable: target.seekable)
         busy = true
-        defer { busy = false }
+        defer { busy = false; optimisticMedia = nil }
         let current = generation
         do {
             var body: [String: Any] = ["item": target.item]
@@ -297,7 +318,7 @@ struct RootView: View {
                     }.frame(maxWidth: .infinity, alignment: .leading).padding().background(Color.orange.opacity(0.1))
                 }
                 if slides { slideList } else { serviceList }
-                if let media = remote.media {
+                if let media = remote.displayedMedia {
                     MediaControls(media: media).id(media.item)
                 }
                 VStack(spacing: 0) {
@@ -392,7 +413,7 @@ struct MediaControls: View {
         return String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
     private func skip(_ delta: Int) {
-        let target = max(media.start, min(media.position + delta, media.duration))
+        let target = max(media.start, min(Int(remote.mediaPosition()) + delta, media.duration))
         Task { await remote.controlMedia("seek", position: target) }
     }
     var body: some View {
@@ -410,21 +431,24 @@ struct MediaControls: View {
                     .disabled(!media.seekable).accessibilityLabel("Forward ten seconds")
             }.font(.title3).buttonStyle(.borderless).frame(height: 44)
             if media.seekable && media.duration > media.start {
-                Slider(value: Binding(get: {
-                    seeking ? seekPosition : Double(max(media.start, min(media.position, media.duration)))
-                }, set: { seekPosition = $0 }), in: Double(media.start)...Double(media.duration), onEditingChanged: { editing in
-                    if editing { seekPosition = Double(media.position); seeking = true }
-                    else {
-                        seeking = false
-                        let position = Int(seekPosition)
-                        Task { await remote.controlMedia("seek", position: position) }
-                    }
-                }).accessibilityLabel("Video position")
-                HStack {
-                    Text(time(seeking ? Int(seekPosition) : media.position))
-                    Spacer()
-                    Text(time(media.duration))
-                }.font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !media.playing || seeking)) { context in
+                    let position = seeking ? seekPosition : remote.mediaPosition(at: context.date)
+                    Slider(value: Binding(get: { position }, set: {
+                        seekPosition = $0
+                        seeking = true
+                    }), in: Double(media.start)...Double(media.duration), onEditingChanged: { editing in
+                        if !editing {
+                            let target = Int(seekPosition)
+                            seeking = false
+                            Task { await remote.controlMedia("seek", position: target) }
+                        }
+                    }).accessibilityLabel("Video position")
+                    HStack {
+                        Text(time(Int(position)))
+                        Spacer()
+                        Text(time(media.duration))
+                    }.font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                }
             }
         }
         .padding(.horizontal, 16).padding(.bottom, 8)
