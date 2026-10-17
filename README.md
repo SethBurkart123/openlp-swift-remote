@@ -1,6 +1,6 @@
 # OpenLP Swift Remote
 
-![OpenLP Swift Remote showing Service and Slides on iPhone](docs/banner.webp)
+![OpenLP Swift Remote showing video controls, Slides, and Service on iPhone](docs/banner.webp)
 
 A small, native iPhone remote for [OpenLP](https://openlp.org), built with SwiftUI. Browse the service, select slides, and control the display without installing OpenLP’s web remote files.
 
@@ -8,13 +8,18 @@ This is an independent project, not an official OpenLP release.
 
 ## Screenshots
 
-All screenshots use fictional demo service content and original sample lyrics.
+Screenshots use fictional demo service content and original sample lyrics. The banner and video screenshot show a simulated paused playback state with a frame from *Big Buck Bunny* — © 2008 Blender Foundation / www.bigbuckbunny.org, [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/).
 
-<p>
-  <img src="docs/screenshots/service.png" width="250" alt="Service list with the current item highlighted">
-  <img src="docs/screenshots/slides.png" width="250" alt="Slides with the current verse highlighted">
-  <img src="docs/screenshots/settings.png" width="250" alt="Connection and live-control settings">
-</p>
+<table>
+  <tr>
+    <td align="center"><strong>Service</strong><br><img src="docs/screenshots/service.png" width="300" alt="Service list with native item-type icons"></td>
+    <td align="center"><strong>Slides</strong><br><img src="docs/screenshots/slides.png" width="300" alt="Song slides with the current verse highlighted"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Video controls</strong><br><img src="docs/screenshots/video.png" width="300" alt="Video preview with playback buttons and seek timeline"></td>
+    <td align="center"><strong>Settings</strong><br><img src="docs/screenshots/settings.png" width="300" alt="Connection settings and live-control preference"></td>
+  </tr>
+</table>
 
 ## Features
 
