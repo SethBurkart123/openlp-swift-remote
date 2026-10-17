@@ -1,5 +1,13 @@
 import SwiftUI
 
+extension KeyedDecodingContainer {
+    func flexibleString(_ key: Key) -> String? {
+        if let value = try? decode(String.self, forKey: key) { return value }
+        if let value = try? decode(Int.self, forKey: key) { return String(value) }
+        return nil
+    }
+}
+
 struct Envelope<T: Decodable>: Decodable { let results: T }
 struct ServiceResult: Decodable { let items: [ServiceItem] }
 struct ServiceItem: Decodable, Identifiable {
@@ -7,6 +15,17 @@ struct ServiceItem: Decodable, Identifiable {
     let title: String
     let selected: Bool
     let plugin: String?
+    enum CodingKeys: String, CodingKey { case id, title, selected, plugin }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        guard let identifier = c.flexibleString(.id) else {
+            throw DecodingError.keyNotFound(CodingKeys.id, .init(codingPath: decoder.codingPath, debugDescription: "Missing service identifier"))
+        }
+        id = identifier
+        title = c.flexibleString(.title) ?? "Untitled item"
+        selected = (try? c.decode(Bool.self, forKey: .selected)) ?? false
+        plugin = c.flexibleString(.plugin)
+    }
     var typeIcon: String {
         switch plugin {
         case "songs": return "music.note"
@@ -38,12 +57,32 @@ struct MediaStatus: Decodable {
     let duration: Int
     let seekable: Bool
 }
-struct SlideResult: Decodable { let item: String?; let slides: [Slide]; let media: MediaStatus? }
+struct SlideResult: Decodable {
+    let item: String?
+    let slides: [Slide]
+    let media: MediaStatus?
+    enum CodingKeys: String, CodingKey { case item, id, slides, media }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        item = c.flexibleString(.item) ?? c.flexibleString(.id)
+        slides = try c.decodeIfPresent([Slide].self, forKey: .slides) ?? []
+        // Fork-specific extensions must never break basic slide browsing.
+        media = try? c.decode(MediaStatus.self, forKey: .media)
+    }
+}
 struct Slide: Decodable {
     let text: String
     let title: String
     let selected: Bool
     let img: String?
+    enum CodingKeys: String, CodingKey { case text, title, selected, img }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        title = c.flexibleString(.title) ?? ""
+        text = c.flexibleString(.text) ?? title
+        selected = (try? c.decode(Bool.self, forKey: .selected)) ?? false
+        img = c.flexibleString(.img)
+    }
 }
 struct Poll: Decodable {
     let blank: Bool
@@ -88,6 +127,12 @@ enum PendingSelection: Equatable {
     }
     @Published var slideItem: String?
     @Published var mode: DisplayMode = .show
+    @Published var displayStateKnown = false
+    @Published var apiName = "Detecting"
+    private enum API { case legacy, v2 }
+    private var api: API?
+    private var token: String?
+    private var pollSupported = true
     @Published var connected = false
     @Published var error: String?
     @Published var commandError: String?
@@ -115,6 +160,7 @@ enum PendingSelection: Equatable {
     func save() {
         pending = nil
         generation += 1
+        api = nil; token = nil; pollSupported = true; displayStateKnown = false; apiName = "Detecting"
         connected = false
         items = []; slides = []; slideItem = nil; media = nil; optimisticMedia = nil
         let d = UserDefaults.standard
@@ -122,11 +168,11 @@ enum PendingSelection: Equatable {
         d.set(https, forKey: "https"); d.set(needsAuth, forKey: "needsAuth")
         d.set(username, forKey: "username")
     }
-    private func request(_ path: String, index: Int? = nil, body: [String: Any]? = nil) async throws -> Data {
+    private func request(_ path: String, index: Int? = nil, body: [String: Any]? = nil, authorization: String? = nil) async throws -> Data {
         guard let baseURL, var c = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
             throw RemoteError.message("Enter a server IP or hostname and a valid port in Settings.")
         }
-        c.path = path
+        c.path = path.removingPercentEncoding ?? path
         if let index { c.queryItems = [URLQueryItem(name: "data", value: "{\"request\":{\"id\":\(index)}}")] }
         guard let url = c.url else { throw RemoteError.message("Invalid server address.") }
         var req = URLRequest(url: url)
@@ -135,13 +181,14 @@ enum PendingSelection: Equatable {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
-        if needsAuth {
+        if let authorization { req.setValue(authorization, forHTTPHeaderField: "Authorization") }
+        else if needsAuth {
             req.setValue("Basic " + Data("\(username):\(password)".utf8).base64EncodedString(), forHTTPHeaderField: "Authorization")
         }
         let (data, response) = try await session.data(for: req)
         guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode) else {
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-            throw RemoteError.message(code == 401 ? "Authentication required. Check Settings." : "Server returned HTTP \(code).")
+            throw RemoteError.http(code)
         }
         return data
     }
@@ -154,19 +201,73 @@ enum PendingSelection: Equatable {
         defer { refreshing = false }
         let current = generation
         do {
-            let service = try await read("/api/service/list", as: ServiceResult.self)
-            let live = try await read("/api/controller/live/text", as: SlideResult.self)
+            var service: ServiceResult
+            var live: SlideResult
+            if api == .v2 {
+                service = ServiceResult(items: try JSONDecoder().decode([ServiceItem].self,
+                    from: await request("/api/v2/service/items")))
+                live = try JSONDecoder().decode(SlideResult.self, from: await request("/api/v2/controller/live-items"))
+            } else {
+                do {
+                    service = try await read("/api/service/list", as: ServiceResult.self)
+                    live = try await read("/api/controller/live/text", as: SlideResult.self)
+                    api = .legacy; apiName = "Legacy API (OpenLP 2 / 3)"
+                } catch RemoteError.http(let code) where code == 404 || code == 405 || code == 410 {
+                    service = ServiceResult(items: try JSONDecoder().decode([ServiceItem].self,
+                        from: await request("/api/v2/service/items")))
+                    live = try JSONDecoder().decode(SlideResult.self, from: await request("/api/v2/controller/live-items"))
+                    api = .v2; apiName = "API v2"
+                }
+            }
             let mediaSampleTime = Date()
-            let poll = try await read("/api/poll", as: Poll.self)
+            var poll: Poll?
+            if pollSupported {
+                do { poll = try await read("/api/poll", as: Poll.self) }
+                catch RemoteError.http(let code) where code == 404 || code == 405 || code == 410 {
+                    pollSupported = false
+                } catch { /* Display state is optional; service and slide controls still work. */ }
+            }
             guard current == generation else { return }
-            items = service.items; slides = live.slides; slideItem = live.item; media = live.media; mediaReceivedAt = mediaSampleTime
-            mode = poll.blank ? .blank : poll.theme ? .theme : poll.display ? .desktop : .show
+            items = service.items; slides = live.slides
+            slideItem = live.item ?? service.items.first(where: { $0.selected })?.id
+            media = live.media; mediaReceivedAt = mediaSampleTime
+            displayStateKnown = poll != nil
+            if let poll { mode = poll.blank ? .blank : poll.theme ? .theme : poll.display ? .desktop : .show }
             connected = true; error = nil; updated = Date()
         } catch {
             guard current == generation, !Task.isCancelled else { return }
             connected = false
             self.error = error.localizedDescription
         }
+    }
+    private func command(_ path: String, index: Int?) async throws {
+        guard api == .v2 else { _ = try await request(path, index: index); return }
+        var destination: String
+        var body: [String: Any]
+        if path == "/api/service/set", let index {
+            destination = "/api/v2/service/show"; body = ["id": items[index].id]
+        } else if path == "/api/controller/live/set", let index {
+            destination = "/api/v2/controller/show"; body = ["id": index]
+        } else if path.hasPrefix("/api/service/direction/") {
+            destination = "/api/v2/service/progress"; body = ["action": String(path.split(separator: "/").last!)]
+        } else if path.hasPrefix("/api/display/") {
+            destination = "/api/v2/core/display"; body = ["display": String(path.split(separator: "/").last!)]
+        } else {
+            destination = "/api/v2/controller/progress"; body = ["action": String(path.split(separator: "/").last!)]
+        }
+        if needsAuth && token == nil { try await login() }
+        do { _ = try await request(destination, body: body, authorization: token) }
+        catch RemoteError.http(401) where needsAuth {
+            // A 401 rejects the command before dispatch; renewing the token is safe.
+            token = nil
+            try await login()
+            _ = try await request(destination, body: body, authorization: token)
+        }
+    }
+    private func login() async throws {
+        struct Login: Decodable { let token: String }
+        token = try JSONDecoder().decode(Login.self, from: await request("/api/v2/core/login",
+            body: ["username": username, "password": password])).token
     }
     private func target(for path: String, index: Int?) -> PendingSelection? {
         if path == "/api/service/set", let index, items.indices.contains(index) {
@@ -210,7 +311,10 @@ enum PendingSelection: Equatable {
         busy = true
         defer { busy = false; pending = nil }
         do {
-            _ = try await request(path, index: index)
+            try await command(path, index: index)
+            // Some v2-only servers expose display status only via WebSocket.
+            // Accept HTTP acknowledgement without inventing a confirmed display mode.
+            if path.hasPrefix("/api/display/") && !displayStateKnown { return true }
             let deadline = Date().addingTimeInterval(8)
             repeat {
                 try await Task.sleep(for: .milliseconds(200))
@@ -262,6 +366,10 @@ enum PendingSelection: Equatable {
     }
     var previewRevision: Int { generation }
     func loadPreview(_ path: String) async throws -> UIImage {
+        if path.hasPrefix("data:image/"), path.utf8.count <= 14_000_000,
+           let comma = path.firstIndex(of: ","), path[..<comma].hasSuffix(";base64"),
+           let data = Data(base64Encoded: String(path[path.index(after: comma)...])),
+           let image = UIImage(data: data) { return image }
         let allowed = ["/api/controller/live/thumbnail/", "/images/", "/media/", "/presentations/"]
         guard allowed.contains(where: { path.hasPrefix($0) }) else {
             throw RemoteError.message("Unsupported preview address.")
@@ -278,7 +386,15 @@ enum PendingSelection: Equatable {
 }
 enum RemoteError: LocalizedError {
     case message(String)
-    var errorDescription: String? { if case .message(let message) = self { return message }; return nil }
+    case http(Int)
+    var errorDescription: String? {
+        switch self {
+        case .message(let message): return message
+        case .http(401), .http(403): return "Authentication required. Check Settings."
+        case .http(404): return "This OpenLP server does not provide the requested feature."
+        case .http(let code): return "Server returned HTTP \(code)."
+        }
+    }
 }
 
 @main struct OpenLPRemoteApp: App {
@@ -323,10 +439,11 @@ struct RootView: View {
                 }
                 VStack(spacing: 0) {
                     Divider()
-                    Picker("Display", selection: Binding(get: { remote.mode }, set: { mode in
+                    Picker("Display", selection: Binding<DisplayMode?>(get: { remote.displayStateKnown ? remote.mode : nil }, set: { mode in
+                        guard let mode else { return }
                         Task { await remote.send("/api/display/\(mode.rawValue.lowercased())") }
                     })) {
-                        ForEach(DisplayMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                        ForEach(DisplayMode.allCases, id: \.self) { Text($0.rawValue).tag(Optional($0)) }
                     }
                     .pickerStyle(.segmented).disabled(!remote.canControl).allowsHitTesting(!remote.busy).padding(.horizontal, 16).padding(.vertical, 8)
                 }.background(.bar)
@@ -519,6 +636,7 @@ struct SettingsView: View {
                     Text("When enabled, tapping items, arrows or display controls changes the live projection. Your choice is remembered. Controls reconnect automatically when the server is available.")
                 }
                 Section {
+                    LabeledContent("API", value: remote.apiName)
                     LabeledContent("Connection", value: remote.connected ? "Connected" : "Disconnected")
                     if let updated = remote.updated { LabeledContent("Last update", value: updated.formatted(date: .omitted, time: .standard)) }
                     Button("Save and check connection") { apply(); Task { await remote.refresh() } }

@@ -52,7 +52,9 @@ In the iPhone simulator, connect to `127.0.0.1`, port `9431`, with HTTPS and aut
 
 ## Compatibility and limitations
 
-The app uses OpenLP’s legacy `/api` endpoints. The API contract was checked against OpenLP 3.1.7 source and read against a running OpenLP server. It has not been tested against every OpenLP release.
+The app detects the available API: legacy `/api` for OpenLP 2.x/3.x, with automatic fallback to `/api/v2` when legacy endpoints are absent. The adapters were checked against OpenLP 2.4.6, 3.1.7, and upstream v2 source. Compatibility checks exercise 2.4-style responses and a v2-only proxy against the local OpenLP instance; this is not a claim of testing every released desktop version.
+
+Missing optional titles, plugin types, thumbnails, or fork-specific playback metadata do not prevent connection. Legacy authentication uses Basic auth; v2 uses the server login token. Missing legacy poll endpoints leave display buttons available without falsely highlighting a confirmed display mode. The detected API is shown in Settings. Native media controls require the fork’s extension and are omitted on stock servers.
 
 The OpenLP API must be reachable even when its web interface is unavailable. Image previews depend on the server’s thumbnail endpoints; unavailable thumbnails show a placeholder. The companion OpenLP fork change on `codex/remote-media-previews` adds authenticated previews for the current live item at `/api/controller/live/thumbnail/<item-id>/<slide-index>`. Run that patched OpenLP source and enable thumbnails in its remote/API settings. Local video files require FFmpeg on the OpenLP computer; previews are still frames from the configured start time, not streaming playback. Streaming URLs and optical media are excluded from thumbnails and seeking. Playback controls require the companion media-control API patch; older servers simply omit the controls. Commands target a specific service item and execute on the OpenLP GUI thread. The app does not include search, alerts, or service editing.
 
