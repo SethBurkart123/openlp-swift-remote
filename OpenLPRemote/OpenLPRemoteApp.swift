@@ -234,19 +234,24 @@ enum PendingSelection: Equatable {
                     api = .v2; apiName = "API v2"
                 }
             }
-            let mediaSampleTime = Date()
+            guard current == generation else { return }
+            // Publish selection before the optional display-status request, which
+            // can be slow or unavailable on older OpenLP servers.
+            items = service.items; slides = live.slides
+            slideItem = live.item ?? service.items.first(where: { $0.selected })?.id
+            media = live.media; mediaReceivedAt = Date()
+            connected = true; error = nil; updated = Date()
             var poll: Poll?
-            if pollSupported {
+            let requestingDisplay: Bool
+            if case .display = pending { requestingDisplay = true } else { requestingDisplay = false }
+            if pollSupported && (!busy || requestingDisplay) {
                 do { poll = try await read("/api/poll", as: Poll.self) }
                 catch RemoteError.http(let code) where code == 404 || code == 405 || code == 410 {
                     pollSupported = false
                 } catch { /* Display state is optional; service and slide controls still work. */ }
             }
             guard current == generation else { return }
-            items = service.items; slides = live.slides
-            slideItem = live.item ?? service.items.first(where: { $0.selected })?.id
-            media = live.media; mediaReceivedAt = mediaSampleTime
-            displayStateKnown = poll != nil
+            if !busy { displayStateKnown = poll != nil }
             if let poll { mode = poll.blank ? .blank : poll.theme ? .theme : poll.display ? .desktop : .show }
             connected = true; error = nil; updated = Date()
         } catch {
@@ -333,13 +338,13 @@ enum PendingSelection: Equatable {
             if path.hasPrefix("/api/display/") && !displayStateKnown { return true }
             let deadline = Date().addingTimeInterval(8)
             repeat {
-                try await Task.sleep(for: .milliseconds(200))
                 guard current == generation, controlsEnabled else { return false }
                 await refresh()
                 guard connected else { throw RemoteError.message(error ?? "Connection lost.") }
                 if let selection {
                     if confirmed(selection) { return true }
                 } else { return true }
+                try await Task.sleep(for: .milliseconds(100))
             } while Date() < deadline
             throw RemoteError.message("OpenLP has not confirmed the requested selection yet.")
         } catch {
@@ -498,7 +503,7 @@ struct RootView: View {
             guard scenePhase == .active else { return }
             while !Task.isCancelled {
                 if scenePhase == .active && !settings { await remote.refresh() }
-                try? await Task.sleep(for: .seconds(2))
+                try? await Task.sleep(for: .milliseconds(500))
             }
         }
     }
@@ -545,7 +550,7 @@ struct RootView: View {
         Task { await remote.send(slides ? "/api/controller/live/\(direction)" : "/api/service/direction/\(direction)") }
     }
     private func selectionColor(live: Bool, pending: Bool) -> Color {
-        live ? Color.blue.opacity(0.28) : pending ? Color.blue.opacity(0.10) : Color(uiColor: .systemBackground)
+        live ? Color.blue.opacity(0.28) : pending ? Color.blue.opacity(0.18) : Color(uiColor: .systemBackground)
     }
     private var serviceList: some View {
         List {
